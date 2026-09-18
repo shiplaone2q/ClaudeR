@@ -41,6 +41,20 @@ def discovery_path(session_name: str) -> str:
     return os.path.join(discovery_dir(), session_name + ".json")
 
 
+def _pid_of(record: Any) -> int:
+    """The pid from a record, or -1 when it is missing or not an integer.
+
+    A hand-edited or half-written record can carry anything in `pid`. Calling
+    int() on it directly raised ValueError from inside the lock, which read as a
+    crash rather than the "inspect this record" error the caller is meant to see.
+    """
+    if not isinstance(record, dict):
+        return -1
+    try:
+        return int(record.get("pid", -1))
+    except (TypeError, ValueError):
+        return -1
+
 def pid_is_alive(pid: Any) -> Optional[bool]:
     """True, False, or None for "cannot tell".
 
@@ -117,14 +131,14 @@ def write_record(session_name: str, port: int, token: str,
         if other is not None and not isinstance(other, dict):
             raise RuntimeError(
                 "Unreadable discovery identity in %s; explicit inspection required" % f)
-        if other is not None and int(other.get("pid", -1)) != os.getpid() \
+        if other is not None and _pid_of(other) != os.getpid() \
                 and pid_is_alive(other.get("pid")) is not False:
             raise RuntimeError(
                 "Session name '%s' is already owned by a live or unknown process"
                 % session_name)
 
         same_owner = (other is not None
-                      and int(other.get("pid", -1)) == os.getpid()
+                      and _pid_of(other) == os.getpid()
                       and other.get("token") == token)
         started = (other.get("started_at") if same_owner and other.get("started_at")
                    else time.strftime("%Y-%m-%dT%H:%M:%S"))
@@ -162,5 +176,5 @@ def remove_record(session_name: str) -> None:
                 info = json.load(fh)
         except Exception:
             return
-        if isinstance(info, dict) and int(info.get("pid", -1)) == os.getpid():
+        if isinstance(info, dict) and _pid_of(info) == os.getpid():
             os.unlink(f)

@@ -264,3 +264,44 @@ class StatusTests(Base):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestDiscoveryPid(unittest.TestCase):
+    """Hand-edited records must produce the documented error, not a ValueError."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self._real_home = disc.home_dir
+        disc.home_dir = lambda: self.dir
+
+    def tearDown(self):
+        disc.home_dir = self._real_home
+        import shutil
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def _write_raw(self, name, payload):
+        path = disc.discovery_path(name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as fh:
+            fh.write(payload)
+        return path
+
+    def _no_lock(self, name):
+        lock = disc.discovery_path(name) + ".lock"
+        os.rmdir(lock) if os.path.isdir(lock) else None
+
+    def test_non_numeric_pid_is_reported_not_crashed(self):
+        """A record with a junk pid is unknown-owned, so the write is refused
+        with the documented RuntimeError rather than a ValueError from int()."""
+        self._write_raw("badpid", json.dumps({"pid": "not-a-pid", "port": 1}))
+        self._no_lock("badpid")
+        with self.assertRaises(RuntimeError) as ctx:
+            disc.write_record("badpid", 8899, "tok")
+        self.assertIn("already owned", str(ctx.exception))
+
+    def test_non_numeric_pid_is_not_removed(self):
+        self._write_raw("badpid2", json.dumps({"pid": "??", "port": 1}))
+        self._no_lock("badpid2")
+        disc.remove_record("badpid2")
+        self.assertTrue(os.path.exists(disc.discovery_path("badpid2")))
+        self._no_lock("badpid2")
