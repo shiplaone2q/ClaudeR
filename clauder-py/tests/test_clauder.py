@@ -305,3 +305,38 @@ class TestDiscoveryPid(unittest.TestCase):
         disc.remove_record("badpid2")
         self.assertTrue(os.path.exists(disc.discovery_path("badpid2")))
         self._no_lock("badpid2")
+
+
+class TestDiscoveryBounds(unittest.TestCase):
+    """Port and name bounds are checked before anything touches the disk."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self._real_home = disc.home_dir
+        disc.home_dir = lambda: self.dir
+
+    def tearDown(self):
+        disc.home_dir = self._real_home
+        import shutil
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def _no_lock(self, name):
+        lock = disc.discovery_path(name) + ".lock"
+        os.rmdir(lock) if os.path.isdir(lock) else None
+
+    def test_port_outside_range_is_refused(self):
+        for bad in (0, -1, 70000, "http"):
+            with self.assertRaises(ValueError):
+                disc.write_record("p", bad, "tok")
+
+    def test_port_bounds_accept_the_edges(self):
+        for good in (1, 65535):
+            path = disc.write_record("edge%d" % good, good, "tok")
+            with open(path) as fh:
+                self.assertEqual(json.load(fh)["port"], good)
+            self._no_lock("edge%d" % good)
+            disc.remove_record("edge%d" % good)
+
+    def test_overlong_session_name_is_refused(self):
+        with self.assertRaises(ValueError):
+            disc.discovery_path("x" * (disc.MAX_SESSION_NAME + 1))

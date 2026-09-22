@@ -22,6 +22,7 @@ DISCOVERY_DIRNAME = ".claude_r_sessions"
 TOKEN_HEADER = "X-Clauder-Token"
 
 _BAD_NAME = re.compile(r'[\\/:<>"|?*\x00-\x1f]')
+MAX_SESSION_NAME = 128
 
 
 def home_dir() -> str:
@@ -38,6 +39,9 @@ def discovery_path(session_name: str) -> str:
     if (not session_name or session_name in (".", "..")
             or _BAD_NAME.search(session_name)):
         raise ValueError("Invalid discovery session name")
+    if len(session_name) > MAX_SESSION_NAME:
+        raise ValueError(
+            "Discovery session name is longer than %d characters" % MAX_SESSION_NAME)
     return os.path.join(discovery_dir(), session_name + ".json")
 
 
@@ -112,8 +116,19 @@ class _Lock:
         return False
 
 
+def _checked_port(port: Any) -> int:
+    """A TCP port that a client can actually connect to."""
+    try:
+        value = int(port)
+    except (TypeError, ValueError):
+        raise ValueError("port must be an integer, got %r" % (port,)) from None
+    if not 1 <= value <= 65535:
+        raise ValueError("port must be between 1 and 65535, got %d" % value)
+    return value
+
 def write_record(session_name: str, port: int, token: str,
                  plot_auto: bool = True, tool_sets: Any = "all") -> str:
+    port = _checked_port(port)
     d = discovery_dir()
     os.makedirs(d, mode=0o700, exist_ok=True)
     f = discovery_path(session_name)
@@ -145,7 +160,7 @@ def write_record(session_name: str, port: int, token: str,
 
         info: Dict[str, Any] = {
             "session_name": session_name,
-            "port": int(port),
+            "port": port,
             "pid": os.getpid(),
             "token": token,
             "started_at": started,
